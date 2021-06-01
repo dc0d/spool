@@ -68,7 +68,7 @@ func Test_Workerpool_Nonblocking_should_just_put_job_in_the_mailbox(t *testing.T
 
 	wg.Add(n)
 	for i := 0; i < n; i++ {
-		pool.Nonblocking(func() {
+		pool.SemiBlocking(func() {
 			defer wg.Done()
 			atomic.AddInt64(&counter, 1)
 		})
@@ -98,40 +98,46 @@ func Test_Workerpool_should_not_stop_because_of_panic(t *testing.T) {
 
 func Test_Workerpool_Grow_should_spin_up_at_least_one_new_worker(t *testing.T) {
 	increased := 1
-	expectedNumberOfWorkers := increased /* the one extra worker */ + 1 /* the default worker */
 	pool := Init(9)
 	defer pool.Stop()
 
 	negativeOrZero := 0
 	pool.Grow(negativeOrZero)
-	time.Sleep(time.Millisecond * 50)
 
-	assert.Equal(t, expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	expectedNumberOfWorkers := increased /* the one extra worker */ + 1 /* the default worker */
+	assert.Eventuallyf(t, func() bool {
+		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
+	}, time.Millisecond*500, time.Millisecond*50,
+		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 }
 
 func Test_Workerpool_Grow_should_spin_up_multiple_new_workers(t *testing.T) {
 	increased := 10
-	expectedNumberOfWorkers := increased + 1
 	pool := Init(9)
 	defer pool.Stop()
 
 	pool.Grow(increased)
-	time.Sleep(time.Millisecond * 50)
 
-	assert.Equal(t, expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	expectedNumberOfWorkers := increased + 1
+	assert.Eventuallyf(t, func() bool {
+		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
+	}, time.Millisecond*500, time.Millisecond*50,
+		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 }
 
 func Test_Workerpool_Grow_should_stop_extra_workers_with_absolute_timeout(t *testing.T) {
 	increased := 10
-	expectedNumberOfWorkers := 1
 	absoluteTimeout := time.Millisecond * 10
 	pool := Init(9)
 	defer pool.Stop()
 
 	pool.Grow(increased, WithAbsoluteTimeout(absoluteTimeout))
-	time.Sleep(time.Millisecond * 50)
 
-	assert.Equal(t, expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	expectedNumberOfWorkers := 1
+	assert.Eventuallyf(t, func() bool {
+		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
+	}, time.Millisecond*500, time.Millisecond*50,
+		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 }
 
 func Test_Workerpool_Grow_should_stop_extra_workers_with_idle_timeout_when_there_are_no_more_jobs(t *testing.T) {
@@ -145,7 +151,7 @@ func Test_Workerpool_Grow_should_stop_extra_workers_with_idle_timeout_when_there
 	wg := &sync.WaitGroup{}
 	wg.Add(n)
 	for i := 0; i < n; i++ {
-		go pool.Nonblocking(func() {
+		go pool.SemiBlocking(func() {
 			defer wg.Done()
 			<-start
 		})
@@ -153,12 +159,10 @@ func Test_Workerpool_Grow_should_stop_extra_workers_with_idle_timeout_when_there
 
 	pool.Grow(increased, WithIdleTimeout(idleTimeout))
 	expectedNumberOfWorkers := 1 + increased
-	for i := 0; i < 3; i++ {
-		if expectedNumberOfWorkers > getNumberOfWorkers(pool) {
-			time.Sleep(time.Millisecond * 50)
-		}
-	}
-	assert.Equal(t, expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	assert.Eventuallyf(t, func() bool {
+		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
+	}, time.Millisecond*500, time.Millisecond*50,
+		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 
 	go func() {
 		for i := 0; i < n; i++ {
@@ -168,12 +172,10 @@ func Test_Workerpool_Grow_should_stop_extra_workers_with_idle_timeout_when_there
 	wg.Wait()
 
 	expectedNumberOfWorkers = 1
-	for i := 0; i < 3; i++ {
-		if expectedNumberOfWorkers < getNumberOfWorkers(pool) {
-			time.Sleep(time.Millisecond * 50)
-		}
-	}
-	assert.Equal(t, expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	assert.Eventuallyf(t, func() bool {
+		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
+	}, time.Millisecond*500, time.Millisecond*50,
+		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 }
 
 func Test_Workerpool_Grow_should_stop_extra_workers_with_explicit_stop_signal(t *testing.T) {
@@ -185,36 +187,36 @@ func Test_Workerpool_Grow_should_stop_extra_workers_with_explicit_stop_signal(t 
 	pool.Grow(increased, WithStopSignal(stopSignal))
 
 	expectedNumberOfWorkers := 1 + increased
-	for i := 0; i < 3; i++ {
-		if expectedNumberOfWorkers > getNumberOfWorkers(pool) {
-			time.Sleep(time.Millisecond * 50)
-		}
-	}
-	assert.Equal(t, expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	assert.Eventuallyf(t, func() bool {
+		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
+	}, time.Millisecond*500, time.Millisecond*50,
+		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 
 	close(stopSignal)
 	expectedNumberOfWorkers = 1
-	for i := 0; i < 3; i++ {
-		if expectedNumberOfWorkers < getNumberOfWorkers(pool) {
-			time.Sleep(time.Millisecond * 50)
-		}
-	}
-	assert.Equal(t, expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	assert.Eventuallyf(t, func() bool {
+		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
+	}, time.Millisecond*500, time.Millisecond*50,
+		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 }
 
 func Test_Workerpool_Grow_should_respawn_after_a_certain_number_of_requests(t *testing.T) {
 	pool := Init(9, WithRespawnAfter(10))
 	defer pool.Stop()
 
-	time.Sleep(time.Millisecond * 50)
-	assert.Equal(t, 1, getNumberOfStarts(pool)) // one start
+	expectedNumberOfStarts := 1 // one initial start
+	assert.Eventually(t, func() bool {
+		return expectedNumberOfStarts == getNumberOfStarts(pool)
+	}, time.Millisecond*500, time.Millisecond*50)
 
 	for i := 0; i < 11; i++ {
 		pool.Blocking(func() {})
 	}
 
-	time.Sleep(time.Millisecond * 50)
-	assert.Equal(t, 2, getNumberOfStarts(pool))
+	expectedNumberOfStarts = 2
+	assert.Eventually(t, func() bool {
+		return expectedNumberOfStarts == getNumberOfStarts(pool)
+	}, time.Millisecond*500, time.Millisecond*50)
 }
 
 func Test_Workerpool_Grow_should_respawn_after_a_certain_timespan_if_reapawnAfter_is_provided(t *testing.T) {
@@ -222,7 +224,8 @@ func Test_Workerpool_Grow_should_respawn_after_a_certain_timespan_if_reapawnAfte
 	defer pool.Stop()
 
 	time.Sleep(time.Millisecond * 190)
-	assert.Equal(t, 4, getNumberOfStarts(pool))
+	expectedNumberOfStarts := 4
+	assert.Equal(t, expectedNumberOfStarts, getNumberOfStarts(pool))
 }
 
 //
@@ -232,7 +235,7 @@ func Test_Workerpool_Stop_should_close_the_pool(t *testing.T) {
 	pool.Stop()
 
 	assert.Panics(t, func() {
-		pool.Nonblocking(func() {})
+		pool.SemiBlocking(func() {})
 	})
 }
 
@@ -243,26 +246,22 @@ func Test_Workerpool_Stop_should_stop_the_workers(t *testing.T) {
 	pool.Grow(increased)
 
 	expectedNumberOfWorkers := 1 + increased
-	for i := 0; i < 3; i++ {
-		if expectedNumberOfWorkers > getNumberOfWorkers(pool) {
-			time.Sleep(time.Millisecond * 50)
-		}
-	}
-	assert.Equal(t, expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	assert.Eventuallyf(t, func() bool {
+		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
+	}, time.Millisecond*500, time.Millisecond*50,
+		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 
 	pool.Stop()
 
 	assert.Panics(t, func() {
-		pool.Nonblocking(func() {})
+		pool.SemiBlocking(func() {})
 	})
 
 	expectedNumberOfWorkers = 0
-	for i := 0; i < 3; i++ {
-		if expectedNumberOfWorkers < getNumberOfWorkers(pool) {
-			time.Sleep(time.Millisecond * 50)
-		}
-	}
-	assert.Equal(t, expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	assert.Eventuallyf(t, func() bool {
+		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
+	}, time.Millisecond*500, time.Millisecond*50,
+		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 }
 
 //
@@ -346,7 +345,7 @@ func ExampleWorkerpool_Blocking() {
 	// 19
 }
 
-func ExampleWorkerpool_Nonblocking() {
+func ExampleWorkerpool_SemiBlocking() {
 	pool := Init(1)
 	defer pool.Stop()
 
@@ -357,7 +356,7 @@ func ExampleWorkerpool_Nonblocking() {
 		atomic.AddInt64(&state, 19)
 	}
 
-	pool.Nonblocking(job)
+	pool.SemiBlocking(job)
 	<-jobDone
 
 	fmt.Println(state)
@@ -377,7 +376,7 @@ func ExampleWorkerpool_Grow() {
 	wg := &sync.WaitGroup{}
 	wg.Add(n)
 	for i := 0; i < n; i++ {
-		pool.Nonblocking(func() { defer wg.Done(); atomic.AddInt64(&state, 1) })
+		pool.SemiBlocking(func() { defer wg.Done(); atomic.AddInt64(&state, 1) })
 	}
 	wg.Wait()
 

@@ -45,10 +45,10 @@ func (pool Workerpool) Blocking(callback func()) {
 	<-done
 }
 
-// Nonblocking sends the job to the worker, as long as the mailbox is not full.
+// SemiBlocking sends the job to the worker in a non-blocking manner, as long as the mailbox is not full.
 // After that, it becomes blocking until there is an empty space in the mailbox.
-// If the workerpool is stopped, Nonblocking will panic.
-func (pool Workerpool) Nonblocking(callback func()) {
+// If the workerpool is stopped, SemiBlocking will panic.
+func (pool Workerpool) SemiBlocking(callback func()) {
 	pool <- callback
 }
 
@@ -69,8 +69,12 @@ func (pool Workerpool) start(options growthOptions) {
 }
 
 func (pool Workerpool) worker(options growthOptions) {
-	workerStarted(pool)
-	defer workerStopped(pool)
+	if workerStarted != nil {
+		workerStarted(pool)
+	}
+	if workerStopped != nil {
+		defer workerStopped(pool)
+	}
 
 	var (
 		absoluteTimeout = options.absoluteTimeout
@@ -125,8 +129,8 @@ func execCallback(callback func()) {
 }
 
 var (
-	workerStarted = func(pool Workerpool) {}
-	workerStopped = func(pool Workerpool) {}
+	workerStarted func(pool Workerpool)
+	workerStopped func(pool Workerpool)
 )
 
 // growth options
