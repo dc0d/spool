@@ -17,7 +17,7 @@ defer pool.Stop()
 The mailbox is just a `chan func()`. In fact the worker-pool itself is defined as:
 
 ```go
-type Workerpool chan func()
+type WorkerPool chan func()
 ```
 
 Jobs can be sent to the worker-pool in two different manners, blocking and nonblocking. To send a job to the worker-pool and block until it's completed:

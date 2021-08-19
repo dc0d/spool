@@ -7,18 +7,18 @@ import (
 	"time"
 )
 
-type Workerpool chan func()
+type WorkerPool chan func()
 
 // Init creates a new workerpool which has one default worker (the minimum number of workers is one).
 // To have more workers, the Grow method should be used.
 // For initial worker absolute timeout and stop signal are ignored.
 // Also, idle timeout is ignored, if no respawnAfter is provided.
-func Init(mailboxSize MailboxSize, opts ...GrowthOption) Workerpool {
+func Init(mailboxSize MailboxSize, opts ...GrowthOption) WorkerPool {
 	if mailboxSize < 0 {
 		mailboxSize = 0
 	}
 
-	var pool Workerpool = make(chan func(), mailboxSize)
+	var pool WorkerPool = make(chan func(), mailboxSize)
 	pool.start(initialWorkerOptions(opts...))
 
 	return pool
@@ -34,12 +34,12 @@ func initialWorkerOptions(opts ...GrowthOption) growthOptions {
 	return options
 }
 
-func (pool Workerpool) Stop() {
+func (pool WorkerPool) Stop() {
 	close(pool)
 }
 
 // Blocking will panic, if the workerpool is stopped.
-func (pool Workerpool) Blocking(callback func()) {
+func (pool WorkerPool) Blocking(callback func()) {
 	done := make(chan struct{})
 	pool <- func() { defer close(done); callback() }
 	<-done
@@ -48,11 +48,11 @@ func (pool Workerpool) Blocking(callback func()) {
 // SemiBlocking sends the job to the worker in a non-blocking manner, as long as the mailbox is not full.
 // After that, it becomes blocking until there is an empty space in the mailbox.
 // If the workerpool is stopped, SemiBlocking will panic.
-func (pool Workerpool) SemiBlocking(callback func()) {
+func (pool WorkerPool) SemiBlocking(callback func()) {
 	pool <- callback
 }
 
-func (pool Workerpool) Grow(growth int, opts ...GrowthOption) {
+func (pool WorkerPool) Grow(growth int, opts ...GrowthOption) {
 	options := applyOptions(opts...)
 
 	if growth <= 0 {
@@ -64,11 +64,11 @@ func (pool Workerpool) Grow(growth int, opts ...GrowthOption) {
 	}
 }
 
-func (pool Workerpool) start(options growthOptions) {
+func (pool WorkerPool) start(options growthOptions) {
 	go pool.worker(options)
 }
 
-func (pool Workerpool) worker(options growthOptions) {
+func (pool WorkerPool) worker(options growthOptions) {
 	if workerStarted != nil {
 		workerStarted(pool)
 	}
@@ -129,8 +129,8 @@ func execCallback(callback func()) {
 }
 
 var (
-	workerStarted func(pool Workerpool)
-	workerStopped func(pool Workerpool)
+	workerStarted func(pool WorkerPool)
+	workerStopped func(pool WorkerPool)
 )
 
 // growth options

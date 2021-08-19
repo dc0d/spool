@@ -14,22 +14,22 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	workerStarted = func(pool Workerpool) { incNumberOfWorkers(pool, 1) }
-	workerStopped = func(pool Workerpool) { decNumberOfWorkers(pool, 1) }
+	workerStarted = func(pool WorkerPool) { incNumberOfWorkers(pool, 1) }
+	workerStopped = func(pool WorkerPool) { decNumberOfWorkers(pool, 1) }
 
 	exitVal := m.Run()
 
 	os.Exit(exitVal)
 }
 
-func Test_Workerpool_Blocking_should_set_default_mailbox_size_to_zero(t *testing.T) {
+func Test_WorkerPool_Blocking_should_set_default_mailbox_size_to_zero(t *testing.T) {
 	pool := Init(-1)
 	defer pool.Stop()
 
 	assert.True(t, len(pool) == 0)
 }
 
-func Test_Workerpool_Blocking_should_serialize_the_jobs(t *testing.T) {
+func Test_WorkerPool_Blocking_should_serialize_the_jobs(t *testing.T) {
 	const n = 1000
 
 	pool := Init(10)
@@ -58,7 +58,7 @@ func Test_Workerpool_Blocking_should_serialize_the_jobs(t *testing.T) {
 	assert.Equal(t, int64(n), counter)
 }
 
-func Test_Workerpool_Nonblocking_should_just_put_job_in_the_mailbox(t *testing.T) {
+func Test_WorkerPool_Nonblocking_should_just_put_job_in_the_mailbox(t *testing.T) {
 	const n = 1000
 	pool := Init(n)
 	defer pool.Stop()
@@ -78,7 +78,7 @@ func Test_Workerpool_Nonblocking_should_just_put_job_in_the_mailbox(t *testing.T
 	assert.Equal(t, int64(n), counter)
 }
 
-func Test_Workerpool_should_not_stop_because_of_panic(t *testing.T) {
+func Test_WorkerPool_should_not_stop_because_of_panic(t *testing.T) {
 	pool := Init(1)
 	defer pool.Stop()
 
@@ -96,7 +96,7 @@ func Test_Workerpool_should_not_stop_because_of_panic(t *testing.T) {
 
 // these tests are good enough for now - still the temporal dependency
 
-func Test_Workerpool_Grow_should_spin_up_at_least_one_new_worker(t *testing.T) {
+func Test_WorkerPool_Grow_should_spin_up_at_least_one_new_worker(t *testing.T) {
 	increased := 1
 	pool := Init(9)
 	defer pool.Stop()
@@ -111,7 +111,7 @@ func Test_Workerpool_Grow_should_spin_up_at_least_one_new_worker(t *testing.T) {
 		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 }
 
-func Test_Workerpool_Grow_should_spin_up_multiple_new_workers(t *testing.T) {
+func Test_WorkerPool_Grow_should_spin_up_multiple_new_workers(t *testing.T) {
 	increased := 10
 	pool := Init(9)
 	defer pool.Stop()
@@ -125,7 +125,7 @@ func Test_Workerpool_Grow_should_spin_up_multiple_new_workers(t *testing.T) {
 		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 }
 
-func Test_Workerpool_Grow_should_stop_extra_workers_with_absolute_timeout(t *testing.T) {
+func Test_WorkerPool_Grow_should_stop_extra_workers_with_absolute_timeout(t *testing.T) {
 	increased := 10
 	absoluteTimeout := time.Millisecond * 10
 	pool := Init(9)
@@ -140,7 +140,7 @@ func Test_Workerpool_Grow_should_stop_extra_workers_with_absolute_timeout(t *tes
 		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 }
 
-func Test_Workerpool_Grow_should_stop_extra_workers_with_idle_timeout_when_there_are_no_more_jobs(t *testing.T) {
+func Test_WorkerPool_Grow_should_stop_extra_workers_with_idle_timeout_when_there_are_no_more_jobs(t *testing.T) {
 	const n = 1000
 	increased := 10
 	idleTimeout := time.Millisecond * 50
@@ -178,7 +178,7 @@ func Test_Workerpool_Grow_should_stop_extra_workers_with_idle_timeout_when_there
 		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 }
 
-func Test_Workerpool_Grow_should_stop_extra_workers_with_explicit_stop_signal(t *testing.T) {
+func Test_WorkerPool_Grow_should_stop_extra_workers_with_explicit_stop_signal(t *testing.T) {
 	increased := 10
 	stopSignal := make(chan struct{})
 	pool := Init(9)
@@ -200,7 +200,7 @@ func Test_Workerpool_Grow_should_stop_extra_workers_with_explicit_stop_signal(t 
 		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
 }
 
-func Test_Workerpool_Grow_should_respawn_after_a_certain_number_of_requests(t *testing.T) {
+func Test_WorkerPool_Grow_should_respawn_after_a_certain_number_of_requests(t *testing.T) {
 	pool := Init(9, WithRespawnAfter(10))
 	defer pool.Stop()
 
@@ -219,7 +219,7 @@ func Test_Workerpool_Grow_should_respawn_after_a_certain_number_of_requests(t *t
 	}, time.Millisecond*500, time.Millisecond*50)
 }
 
-func Test_Workerpool_Grow_should_respawn_after_a_certain_timespan_if_reapawnAfter_is_provided(t *testing.T) {
+func Test_WorkerPool_Grow_should_respawn_after_a_certain_timespan_if_reapawnAfter_is_provided(t *testing.T) {
 	pool := Init(9, WithRespawnAfter(1000), WithIdleTimeout(time.Millisecond*50))
 	defer pool.Stop()
 
@@ -230,7 +230,7 @@ func Test_Workerpool_Grow_should_respawn_after_a_certain_timespan_if_reapawnAfte
 
 //
 
-func Test_Workerpool_Stop_should_close_the_pool(t *testing.T) {
+func Test_WorkerPool_Stop_should_close_the_pool(t *testing.T) {
 	pool := Init(9)
 	pool.Stop()
 
@@ -239,7 +239,7 @@ func Test_Workerpool_Stop_should_close_the_pool(t *testing.T) {
 	})
 }
 
-func Test_Workerpool_Stop_should_stop_the_workers(t *testing.T) {
+func Test_WorkerPool_Stop_should_stop_the_workers(t *testing.T) {
 	pool := Init(9)
 
 	increased := 10
@@ -295,42 +295,42 @@ func Test_initialWorkerOptions(t *testing.T) {
 
 //
 
-func getNumberOfWorkers(pool Workerpool) int {
-	accessWorkerpoolState.RLock()
-	defer accessWorkerpoolState.RUnlock()
+func getNumberOfWorkers(pool WorkerPool) int {
+	accessWorkerPoolState.RLock()
+	defer accessWorkerPoolState.RUnlock()
 
 	return workerpoolStateWorkerCount[pool]
 }
 
-func getNumberOfStarts(pool Workerpool) int {
-	accessWorkerpoolState.RLock()
-	defer accessWorkerpoolState.RUnlock()
+func getNumberOfStarts(pool WorkerPool) int {
+	accessWorkerPoolState.RLock()
+	defer accessWorkerPoolState.RUnlock()
 
 	return workerpoolStateWorkerStartCount[pool]
 }
 
-func incNumberOfWorkers(pool Workerpool, count int) {
-	accessWorkerpoolState.Lock()
-	defer accessWorkerpoolState.Unlock()
+func incNumberOfWorkers(pool WorkerPool, count int) {
+	accessWorkerPoolState.Lock()
+	defer accessWorkerPoolState.Unlock()
 
 	workerpoolStateWorkerCount[pool] += count
 	workerpoolStateWorkerStartCount[pool] += count
 }
 
-func decNumberOfWorkers(pool Workerpool, count int) {
-	accessWorkerpoolState.Lock()
-	defer accessWorkerpoolState.Unlock()
+func decNumberOfWorkers(pool WorkerPool, count int) {
+	accessWorkerPoolState.Lock()
+	defer accessWorkerPoolState.Unlock()
 
 	workerpoolStateWorkerCount[pool] -= count
 }
 
 var (
-	workerpoolStateWorkerCount      = make(map[Workerpool]int)
-	workerpoolStateWorkerStartCount = make(map[Workerpool]int)
-	accessWorkerpoolState           = &sync.RWMutex{}
+	workerpoolStateWorkerCount      = make(map[WorkerPool]int)
+	workerpoolStateWorkerStartCount = make(map[WorkerPool]int)
+	accessWorkerPoolState           = &sync.RWMutex{}
 )
 
-func ExampleWorkerpool_Blocking() {
+func ExampleWorkerPool_Blocking() {
 	pool := Init(1)
 	defer pool.Stop()
 
@@ -339,13 +339,13 @@ func ExampleWorkerpool_Blocking() {
 
 	pool.Blocking(job)
 
-	fmt.Println(state)
+	fmt.Println(atomic.LoadInt64(&state))
 
 	// Output:
 	// 19
 }
 
-func ExampleWorkerpool_SemiBlocking() {
+func ExampleWorkerPool_SemiBlocking() {
 	pool := Init(1)
 	defer pool.Stop()
 
@@ -365,7 +365,7 @@ func ExampleWorkerpool_SemiBlocking() {
 	// 19
 }
 
-func ExampleWorkerpool_Grow() {
+func ExampleWorkerPool_Grow() {
 	const n = 19
 	pool := Init(10)
 	defer pool.Stop()
