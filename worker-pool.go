@@ -9,29 +9,19 @@ import (
 
 type WorkerPool chan func()
 
-// Init creates a new workerpool which has one default worker (the minimum number of workers is one).
+// New creates a new workerpool. If initialPoolSize is zero, no initial workers will be started.
 // To have more workers, the Grow method should be used.
-// For initial worker absolute timeout and stop signal are ignored.
-// Also, idle timeout is ignored, if no respawnAfter is provided.
-func Init(mailboxSize MailboxSize, opts ...GrowthOption) WorkerPool {
+func New(mailboxSize MailboxSize, initialPoolSize int, opts ...GrowthOption) WorkerPool {
 	if mailboxSize < 0 {
 		mailboxSize = 0
 	}
 
 	var pool WorkerPool = make(chan func(), mailboxSize)
-	pool.start(initialWorkerOptions(opts...))
+	if initialPoolSize > 0 {
+		pool.Grow(initialPoolSize, opts...)
+	}
 
 	return pool
-}
-
-func initialWorkerOptions(opts ...GrowthOption) growthOptions {
-	options := applyOptions(opts...)
-	options.absoluteTimeout = 0
-	options.stopSignal = nil
-	if options.respawnAfter == 0 && options.idleTimeout > 0 {
-		options.idleTimeout = 0
-	}
-	return options
 }
 
 func (pool WorkerPool) Stop() {
