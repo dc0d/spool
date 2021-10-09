@@ -3,8 +3,8 @@
 package spool
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,41 +13,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMain(m *testing.M) {
-	workerStarted = func(pool WorkerPool) { incNumberOfWorkers(pool, 1) }
-	workerStopped = func(pool WorkerPool) { decNumberOfWorkers(pool, 1) }
-
-	exitVal := m.Run()
-
-	os.Exit(exitVal)
-}
-
 func Test_WorkerPool_New(t *testing.T) {
 	t.Run(`should set default mailbox size to zero`, func(t *testing.T) {
-		pool := New(-1, 0)
+		pool := New(-1)
 		defer pool.Stop()
 
 		assert.True(t, len(pool) == 0)
 	})
 
-	t.Run(`should start n initial workers`, func(t *testing.T) {
-		n := 100 // initial workers
-		pool := New(-1, n)
+	t.Run(`should not start any initial workers`, func(t *testing.T) {
+		pool := New(-1)
 		defer pool.Stop()
-
-		var count int64
-		stop := make(chan struct{})
-		defer close(stop)
-		for i := 0; i < n; i++ {
-			pool.SemiBlocking(func() {
-				atomic.AddInt64(&count, 1)
-				<-stop
-			})
-		}
-
-		assert.Eventually(t, func() bool {
-			return atomic.LoadInt64(&count) == int64(n)
-		}, time.Millisecond*300, time.Millisecond*20)
 
 		assert.Never(t, func() bool {
 			select {
@@ -60,28 +36,49 @@ func Test_WorkerPool_New(t *testing.T) {
 	})
 }
 
+func Test_WorkerPool_grow_should_spawn_workers_equal_to_growth(t *testing.T) {
+	var (
+		ctx     = context.Background()
+		growth  = 100
+		options []Option
+	)
+	pool := New(-1)
+	exec := &CallbacksSpy{
+		StoppedFunc: func() {},
+	}
+	executorFactory := func() Callbacks { return exec }
+
+	pool.grow(ctx, growth, executorFactory, options...)
+	pool.Stop()
+
+	assert.Eventually(t, func() bool {
+		return len(exec.StoppedCalls()) == growth
+	}, time.Millisecond*300, time.Millisecond*20)
+}
+
 func Test_WorkerPool_Blocking_should_serialize_the_jobs(t *testing.T) {
 	const n = 1000
 
-	pool := New(10, 1)
+	pool := New(10)
 	defer pool.Stop()
-
+	pool.Grow(context.Background(), 1)
 	var (
 		counter, previous int64
 	)
-
 	wg := &sync.WaitGroup{}
 	wg.Add(n)
 	start := make(chan struct{})
 	for i := 0; i < n; i++ {
-		go pool.Blocking(func() {
-			defer wg.Done()
-			<-start
+		go func() {
+			_ = pool.Blocking(context.Background(), func() {
+				defer wg.Done()
+				<-start
 
-			previous = atomic.LoadInt64(&counter)
-			next := atomic.AddInt64(&counter, 1)
-			assert.Equal(t, previous+1, next)
-		})
+				previous = atomic.LoadInt64(&counter)
+				next := atomic.AddInt64(&counter, 1)
+				assert.Equal(t, previous+1, next)
+			})
+		}()
 	}
 	close(start) // signal all jobs they are green to go
 	wg.Wait()
@@ -89,17 +86,28 @@ func Test_WorkerPool_Blocking_should_serialize_the_jobs(t *testing.T) {
 	assert.Equal(t, int64(n), counter)
 }
 
-func Test_WorkerPool_Nonblocking_should_just_put_job_in_the_mailbox(t *testing.T) {
-	const n = 1000
-	pool := New(n, 1)
+func Test_WorkerPool_Blocking_should_respect_context_cancellation(t *testing.T) {
+	pool := New(-1)
 	defer pool.Stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
+	err := pool.Blocking(ctx, func() { panic("should not be called") })
+
+	assert.Equal(t, context.Canceled, err)
+}
+
+func Test_WorkerPool_SemiBlocking_should_just_put_job_in_the_mailbox(t *testing.T) {
+	const n = 1000
+	pool := New(n)
+	defer pool.Stop()
+	pool.Grow(context.Background(), 1)
 	var counter int64 = 0
 	wg := &sync.WaitGroup{}
 
 	wg.Add(n)
 	for i := 0; i < n; i++ {
-		pool.SemiBlocking(func() {
+		_ = pool.SemiBlocking(context.Background(), func() {
 			defer wg.Done()
 			atomic.AddInt64(&counter, 1)
 		})
@@ -109,237 +117,149 @@ func Test_WorkerPool_Nonblocking_should_just_put_job_in_the_mailbox(t *testing.T
 	assert.Equal(t, int64(n), counter)
 }
 
-func Test_WorkerPool_should_not_stop_because_of_panic(t *testing.T) {
-	pool := New(1, 1)
+func Test_WorkerPool_SemiBlocking_should_respect_context_cancellation(t *testing.T) {
+	pool := New(-1)
 	defer pool.Stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
-	pool.Blocking(func() {
+	err := pool.SemiBlocking(ctx, func() { panic("should not be called") })
+
+	assert.Equal(t, context.Canceled, err)
+}
+
+func Test_WorkerPool_should_not_stop_because_of_panic(t *testing.T) {
+	pool := New(1)
+	defer pool.Stop()
+	pool.Grow(context.Background(), 1)
+
+	_ = pool.Blocking(context.Background(), func() {
 		panic("some error")
 	})
 
 	counter := 0
-	pool.Blocking(func() {
+	_ = pool.Blocking(context.Background(), func() {
 		counter++
 	})
 
 	assert.Equal(t, 1, counter)
 }
 
-// these tests are good enough for now - still the temporal dependency
-
-func Test_WorkerPool_Grow_should_spin_up_at_least_one_new_worker(t *testing.T) {
-	increased := 1
-	pool := New(9, 1)
-	defer pool.Stop()
-
-	negativeOrZero := 0
-	pool.Grow(negativeOrZero)
-
-	expectedNumberOfWorkers := increased /* the one extra worker */ + 1 /* the default worker */
-	assert.Eventuallyf(t, func() bool {
-		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
-	}, time.Millisecond*500, time.Millisecond*50,
-		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
-}
-
-func Test_WorkerPool_Grow_should_spin_up_multiple_new_workers(t *testing.T) {
-	increased := 10
-	pool := New(9, 1)
-	defer pool.Stop()
-
-	pool.Grow(increased)
-
-	expectedNumberOfWorkers := increased + 1
-	assert.Eventuallyf(t, func() bool {
-		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
-	}, time.Millisecond*500, time.Millisecond*50,
-		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
-}
-
 func Test_WorkerPool_Grow_should_stop_extra_workers_with_absolute_timeout(t *testing.T) {
 	increased := 10
 	absoluteTimeout := time.Millisecond * 10
-	pool := New(9, 1)
+	pool := New(9)
 	defer pool.Stop()
+	exec := &CallbacksSpy{
+		StoppedFunc: func() {},
+	}
+	executorFactory := func() Callbacks { return exec }
 
-	pool.Grow(increased, WithAbsoluteTimeout(absoluteTimeout))
+	pool.grow(context.Background(), increased, executorFactory, WithAbsoluteTimeout(absoluteTimeout))
 
-	expectedNumberOfWorkers := 1
-	assert.Eventuallyf(t, func() bool {
-		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
-	}, time.Millisecond*500, time.Millisecond*50,
-		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	assert.Eventually(t, func() bool {
+		return len(exec.StoppedCalls()) == increased
+	}, time.Millisecond*500, time.Millisecond*50)
 }
 
 func Test_WorkerPool_Grow_should_stop_extra_workers_with_idle_timeout_when_there_are_no_more_jobs(t *testing.T) {
 	const n = 1000
 	increased := 10
 	idleTimeout := time.Millisecond * 50
-	pool := New(100, 1)
+	pool := New(100)
 	defer pool.Stop()
+	exec := &CallbacksSpy{
+		StoppedFunc:  func() {},
+		ReceivedFunc: func(fn func()) { fn() },
+	}
+	executorFactory := func() Callbacks { return exec }
 
 	start := make(chan struct{}, n)
 	wg := &sync.WaitGroup{}
 	wg.Add(n)
 	for i := 0; i < n; i++ {
-		go pool.SemiBlocking(func() {
-			defer wg.Done()
-			<-start
-		})
+		go func() {
+			_ = pool.SemiBlocking(context.Background(), func() {
+				defer wg.Done()
+				<-start
+			})
+		}()
 	}
+	pool.grow(context.Background(), increased, executorFactory, WithIdleTimeout(idleTimeout))
 
-	pool.Grow(increased, WithIdleTimeout(idleTimeout))
-	expectedNumberOfWorkers := 1 + increased
+	expectedNumberOfWorkers := increased
 	assert.Eventuallyf(t, func() bool {
-		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
-	}, time.Millisecond*500, time.Millisecond*50,
-		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
+		return expectedNumberOfWorkers == len(exec.ReceivedCalls())
+	}, time.Millisecond*1000, time.Millisecond*20,
+		"expected %v actual %v", expectedNumberOfWorkers, func() int { return len(exec.ReceivedCalls()) }())
 
-	go func() {
-		for i := 0; i < n; i++ {
-			start <- struct{}{}
-		}
-	}()
+	close(start)
 	wg.Wait()
 
-	expectedNumberOfWorkers = 1
-	assert.Eventuallyf(t, func() bool {
-		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
-	}, time.Millisecond*500, time.Millisecond*50,
-		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	expectedNumberOfStoppedWorkers := 10
+	assert.Eventually(t, func() bool {
+		return expectedNumberOfStoppedWorkers == len(exec.StoppedCalls())
+	}, time.Millisecond*5000, time.Millisecond*50)
 }
 
-func Test_WorkerPool_Grow_should_stop_extra_workers_with_explicit_stop_signal(t *testing.T) {
+func Test_WorkerPool_Grow_should_stop_extra_workers_when_context_is_canceled(t *testing.T) {
 	increased := 10
-	stopSignal := make(chan struct{})
-	pool := New(9, 1)
+	pool := New(10)
 	defer pool.Stop()
-
-	pool.Grow(increased, WithStopSignal(stopSignal))
-
-	expectedNumberOfWorkers := 1 + increased
-	assert.Eventuallyf(t, func() bool {
-		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
-	}, time.Millisecond*500, time.Millisecond*50,
-		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
-
-	close(stopSignal)
-	expectedNumberOfWorkers = 1
-	assert.Eventuallyf(t, func() bool {
-		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
-	}, time.Millisecond*500, time.Millisecond*50,
-		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
-}
-
-func Test_WorkerPool_Grow_should_respawn_after_a_certain_number_of_requests(t *testing.T) {
-	pool := New(9, 1, WithRespawnAfter(10))
-	defer pool.Stop()
-
-	expectedNumberOfStarts := 1 // one initial start
-	assert.Eventually(t, func() bool {
-		return expectedNumberOfStarts == getNumberOfStarts(pool)
-	}, time.Millisecond*500, time.Millisecond*50)
-
-	for i := 0; i < 11; i++ {
-		pool.Blocking(func() {})
+	exec := &CallbacksSpy{
+		StoppedFunc:  func() {},
+		ReceivedFunc: func(fn func()) { fn() },
 	}
+	executorFactory := func() Callbacks { return exec }
+	pool.grow(context.Background(), 1, executorFactory)
 
-	expectedNumberOfStarts = 2
+	ctx, cancel := context.WithCancel(context.Background())
+	pool.grow(ctx, increased, executorFactory)
+
+	cancel()
+
+	expectedNumberOfStoppedWorkers := increased
 	assert.Eventually(t, func() bool {
-		return expectedNumberOfStarts == getNumberOfStarts(pool)
-	}, time.Millisecond*500, time.Millisecond*50)
+		return expectedNumberOfStoppedWorkers == len(exec.StoppedCalls())
+	}, time.Millisecond*5000, time.Millisecond*50)
 }
-
-func Test_WorkerPool_Grow_should_respawn_after_a_certain_timespan_if_reapawnAfter_is_provided(t *testing.T) {
-	pool := New(9, 1, WithRespawnAfter(1000), WithIdleTimeout(time.Millisecond*50))
-	defer pool.Stop()
-
-	time.Sleep(time.Millisecond * 190)
-	expectedNumberOfStarts := 4
-	assert.Equal(t, expectedNumberOfStarts, getNumberOfStarts(pool))
-}
-
-//
 
 func Test_WorkerPool_Stop_should_close_the_pool(t *testing.T) {
-	pool := New(9, 1)
+	pool := New(9)
 	pool.Stop()
 
 	assert.Panics(t, func() {
-		pool.SemiBlocking(func() {})
+		_ = pool.SemiBlocking(context.Background(), func() {})
 	})
 }
 
 func Test_WorkerPool_Stop_should_stop_the_workers(t *testing.T) {
-	pool := New(9, 1)
-
+	pool := New(9)
 	increased := 10
-	pool.Grow(increased)
-
-	expectedNumberOfWorkers := 1 + increased
-	assert.Eventuallyf(t, func() bool {
-		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
-	}, time.Millisecond*500, time.Millisecond*50,
-		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	exec := &CallbacksSpy{
+		StoppedFunc:  func() {},
+		ReceivedFunc: func(fn func()) { fn() },
+	}
+	executorFactory := func() Callbacks { return exec }
+	pool.grow(context.Background(), increased, executorFactory)
 
 	pool.Stop()
 
-	assert.Panics(t, func() {
-		pool.SemiBlocking(func() {})
-	})
-
-	expectedNumberOfWorkers = 0
-	assert.Eventuallyf(t, func() bool {
-		return expectedNumberOfWorkers == getNumberOfWorkers(pool)
-	}, time.Millisecond*500, time.Millisecond*50,
-		"expectedNumberOfWorkers: %v, actual: %v", expectedNumberOfWorkers, getNumberOfWorkers(pool))
+	expectedNumberOfStoppedWorkers := increased
+	assert.Eventually(t, func() bool {
+		return expectedNumberOfStoppedWorkers == len(exec.StoppedCalls())
+	}, time.Millisecond*5000, time.Millisecond*50)
 }
-
-//
-
-func getNumberOfWorkers(pool WorkerPool) int {
-	accessWorkerPoolState.RLock()
-	defer accessWorkerPoolState.RUnlock()
-
-	return workerpoolStateWorkerCount[pool]
-}
-
-func getNumberOfStarts(pool WorkerPool) int {
-	accessWorkerPoolState.RLock()
-	defer accessWorkerPoolState.RUnlock()
-
-	return workerpoolStateWorkerStartCount[pool]
-}
-
-func incNumberOfWorkers(pool WorkerPool, count int) {
-	accessWorkerPoolState.Lock()
-	defer accessWorkerPoolState.Unlock()
-
-	workerpoolStateWorkerCount[pool] += count
-	workerpoolStateWorkerStartCount[pool] += count
-}
-
-func decNumberOfWorkers(pool WorkerPool, count int) {
-	accessWorkerPoolState.Lock()
-	defer accessWorkerPoolState.Unlock()
-
-	workerpoolStateWorkerCount[pool] -= count
-}
-
-var (
-	workerpoolStateWorkerCount      = make(map[WorkerPool]int)
-	workerpoolStateWorkerStartCount = make(map[WorkerPool]int)
-	accessWorkerPoolState           = &sync.RWMutex{}
-)
 
 func ExampleWorkerPool_Blocking() {
-	pool := New(1, 1)
+	pool := New(1)
 	defer pool.Stop()
+	pool.Grow(context.Background(), 1)
 
 	var state int64
 	job := func() { atomic.AddInt64(&state, 19) }
 
-	pool.Blocking(job)
+	_ = pool.Blocking(context.Background(), job)
 
 	fmt.Println(atomic.LoadInt64(&state))
 
@@ -348,8 +268,9 @@ func ExampleWorkerPool_Blocking() {
 }
 
 func ExampleWorkerPool_SemiBlocking() {
-	pool := New(1, 1)
+	pool := New(1)
 	defer pool.Stop()
+	pool.Grow(context.Background(), 1)
 
 	var state int64
 	jobDone := make(chan struct{})
@@ -358,7 +279,7 @@ func ExampleWorkerPool_SemiBlocking() {
 		atomic.AddInt64(&state, 19)
 	}
 
-	pool.SemiBlocking(job)
+	_ = pool.SemiBlocking(context.Background(), job)
 	<-jobDone
 
 	fmt.Println(state)
@@ -369,16 +290,16 @@ func ExampleWorkerPool_SemiBlocking() {
 
 func ExampleWorkerPool_Grow() {
 	const n = 19
-	pool := New(10, 1)
+	pool := New(1)
 	defer pool.Stop()
 
-	pool.Grow(3) // spin up three new workers
+	pool.Grow(context.Background(), 3) // spin up three new workers
 
 	var state int64
 	wg := &sync.WaitGroup{}
 	wg.Add(n)
 	for i := 0; i < n; i++ {
-		pool.SemiBlocking(func() { defer wg.Done(); atomic.AddInt64(&state, 1) })
+		_ = pool.SemiBlocking(context.Background(), func() { defer wg.Done(); atomic.AddInt64(&state, 1) })
 	}
 	wg.Wait()
 
