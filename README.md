@@ -10,7 +10,7 @@
 First, initialize the worker-poll with a mailbox of a certain size:
 
 ```go
-pool := Init(n)
+pool := New(n)
 defer pool.Stop()
 ```
 
@@ -23,7 +23,7 @@ type WorkerPool chan func()
 Jobs can be sent to the worker-pool in two different manners, blocking and nonblocking. To send a job to the worker-pool and block until it's completed:
 
 ```go
-pool.Blocking(func() {
+pool.Blocking(ctx, func() {
     // ...
 })
 ```
@@ -31,34 +31,34 @@ pool.Blocking(func() {
 And to send a job to the worker-pool and then move on:
 
 ```go
-pool.Nonblocking(func() {
+pool.SemiBlocking(ctx, func() {
     // ...
 })
 ```
 
-As long as there is an empty space in the mailbox, `Nonblocking` will just queue the job, and moves on. When there are no more empty spaces in the mailbox, `Nonblocking` becomes blocking.
+As long as there is an empty space in the mailbox, `SemiBlocking` will just queue the job, and moves on. When there are no more empty spaces in the mailbox, `SemiBlocking` becomes blocking.
 
-A worker-pool by default has one worker. To add workers to the worker-pool:
+A worker-pool by default has no workers and they should be added explicitly. To add workers to the worker-pool:
 
 ```go
-pool.Grow(9)
+pool.Grow(ctx, 10)
 ```
 
-Now, the worker-pool has `10` workers, one default worker and nine added workers.
+Now, the worker-pool has `10` workers.
 
 It's possible to add temporary workers to the worker-pool:
 
 ```go
-pool.Grow(9, WithAbsoluteTimeout(time.Minute * 5))
+pool.Grow(ctx, 9, WithAbsoluteTimeout(time.Minute * 5))
 ```
 
 Also, instead of using and absolute timeout, an idle timeout can be used. In this case, added workers will stop, if they are idle for a certain duration:
 
 ```go
-pool.Grow(9, WithIdleTimeout(time.Minute * 5))
+pool.Grow(ctx, 9, WithIdleTimeout(time.Minute * 5))
 ```
 
-The `Blocking` and `Nonblocking` methods will panic if the worker-pool is stopped - to enforce visibility on job execution.
+The `Blocking` and `SemiBlocking` methods will panic if the worker-pool is stopped - to enforce visibility on job execution.
 
 ## spool serializes the jobs in single worker mode
 
