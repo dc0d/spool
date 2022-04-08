@@ -5,12 +5,14 @@ package spool
 import (
 	"context"
 	"log"
+
+	"github.com/dc0d/spool/actor"
 )
 
 type WorkerPool chan func()
 
 // New creates a new WorkerPool without any initial workers. To spawn workers, Grow must be called.
-func New(mailboxSize MailboxSize) WorkerPool {
+func New(mailboxSize actor.MailboxSize) WorkerPool {
 	if mailboxSize < 0 {
 		mailboxSize = 0
 	}
@@ -45,18 +47,18 @@ func (pool WorkerPool) SemiBlocking(ctx context.Context, callback func()) error 
 	return nil
 }
 
-func (pool WorkerPool) Grow(ctx context.Context, growth int, options ...Option) {
+func (pool WorkerPool) Grow(ctx context.Context, growth int, options ...actor.Option) {
 	pool.grow(ctx, growth, nil, options...)
 }
 
-func (pool WorkerPool) grow(ctx context.Context, growth int, executorFactory func() Callbacks, options ...Option) {
+func (pool WorkerPool) grow(ctx context.Context, growth int, executorFactory func() actor.Callbacks[T], options ...actor.Option) {
 	var mailbox <-chan func() = pool
 	for i := 0; i < growth; i++ {
-		var exec Callbacks = defaultExecutor{}
+		var exec actor.Callbacks[T] = defaultExecutor{}
 		if executorFactory != nil {
 			exec = executorFactory()
 		}
-		Start(ctx, mailbox, exec, options...)
+		actor.Start(ctx, mailbox, exec, options...)
 	}
 }
 
@@ -72,3 +74,7 @@ func (obj defaultExecutor) Received(fn T) {
 }
 
 func (obj defaultExecutor) Stopped() {}
+
+type (
+	T = func()
+)

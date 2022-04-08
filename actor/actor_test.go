@@ -8,6 +8,7 @@ package actor
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -17,15 +18,15 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	started = func(box Mailbox) {
+	started = func(box interface{}) {
 		accessMailboxState.Lock()
 		defer accessMailboxState.Unlock()
-		mailboxStateWorkerStartCount[box]++
+		mailboxStateWorkerStartCount[strKey(box)]++
 	}
-	stopped = func(box Mailbox) {
+	stopped = func(box interface{}) {
 		accessMailboxState.Lock()
 		defer accessMailboxState.Unlock()
-		mailboxStateWorkerStopCount[box]++
+		mailboxStateWorkerStopCount[strKey(box)]++
 	}
 
 	exitVal := m.Run()
@@ -34,13 +35,14 @@ func TestMain(m *testing.M) {
 }
 
 func Test_should_call_received_concurrently(t *testing.T) {
+	type T = interface{}
 	var (
 		mailbox   = make(chan T)
-		callbacks = &CallbacksSpy{}
+		callbacks = &CallbacksSpy[T]{}
 	)
 	callbacks.ReceivedFunc = func(T) {}
 
-	Start(context.TODO(), mailbox, callbacks)
+	Start[T](context.TODO(), mailbox, callbacks)
 
 	mailbox <- 1
 	mailbox <- 2
@@ -55,14 +57,15 @@ func Test_should_call_received_concurrently(t *testing.T) {
 }
 
 func Test_should_call_stopped_when_context_is_canceled(t *testing.T) {
+	type T = interface{}
 	var (
 		mailbox   = make(chan T)
-		callbacks = &CallbacksSpy{}
+		callbacks = &CallbacksSpy[T]{}
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	callbacks.StoppedFunc = func() {}
 
-	Start(ctx, mailbox, callbacks)
+	Start[T](ctx, mailbox, callbacks)
 	cancel()
 
 	assert.Eventually(t, func() bool { return len(callbacks.StoppedCalls()) == 1 },
@@ -70,14 +73,15 @@ func Test_should_call_stopped_when_context_is_canceled(t *testing.T) {
 }
 
 func Test_should_not_call_received_when_context_is_canceled(t *testing.T) {
+	type T = interface{}
 	var (
 		mailbox   = make(chan T)
-		callbacks = &CallbacksSpy{}
+		callbacks = &CallbacksSpy[T]{}
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	callbacks.StoppedFunc = func() {}
 
-	Start(ctx, mailbox, callbacks)
+	Start[T](ctx, mailbox, callbacks)
 	cancel()
 
 	assert.Eventually(t, func() bool { return len(callbacks.StoppedCalls()) == 1 },
@@ -95,26 +99,28 @@ func Test_should_not_call_received_when_context_is_canceled(t *testing.T) {
 }
 
 func Test_should_stop_after_absolute_timeout(t *testing.T) {
+	type T = interface{}
 	var (
 		mailbox   = make(chan T)
-		callbacks = &CallbacksSpy{}
+		callbacks = &CallbacksSpy[T]{}
 	)
 	callbacks.StoppedFunc = func() {}
 
-	Start(context.Background(), mailbox, callbacks, WithAbsoluteTimeout(time.Millisecond*50))
+	Start[T](context.Background(), mailbox, callbacks, WithAbsoluteTimeout(time.Millisecond*50))
 
 	assert.Eventually(t, func() bool { return len(callbacks.StoppedCalls()) == 1 },
 		time.Millisecond*300, time.Millisecond*20)
 }
 
 func Test_should_stop_when_mailbox_is_closed(t *testing.T) {
+	type T = interface{}
 	var (
 		mailbox   = make(chan T)
-		callbacks = &CallbacksSpy{}
+		callbacks = &CallbacksSpy[T]{}
 	)
 	callbacks.StoppedFunc = func() {}
 
-	Start(context.Background(), mailbox, callbacks)
+	Start[T](context.Background(), mailbox, callbacks)
 	close(mailbox)
 
 	assert.Eventually(t, func() bool { return len(callbacks.StoppedCalls()) == 1 },
@@ -123,13 +129,14 @@ func Test_should_stop_when_mailbox_is_closed(t *testing.T) {
 }
 
 func Test_should_stop_after_idle_timeout_elapsed(t *testing.T) {
+	type T = interface{}
 	var (
 		mailbox   = make(chan T)
-		callbacks = &CallbacksSpy{}
+		callbacks = &CallbacksSpy[T]{}
 	)
 	callbacks.StoppedFunc = func() {}
 
-	Start(context.Background(), mailbox, callbacks, WithIdleTimeout(time.Millisecond*100))
+	Start[T](context.Background(), mailbox, callbacks, WithIdleTimeout(time.Millisecond*100))
 
 	assert.Never(t, func() bool { return len(callbacks.StoppedCalls()) > 0 },
 		time.Millisecond*100, time.Millisecond*20)
@@ -139,14 +146,15 @@ func Test_should_stop_after_idle_timeout_elapsed(t *testing.T) {
 }
 
 func Test_should_respawn_after_receiving_n_messages(t *testing.T) {
+	type T = interface{}
 	var (
 		mailbox   = make(chan T)
-		callbacks = &CallbacksSpy{}
+		callbacks = &CallbacksSpy[T]{}
 	)
 	callbacks.StoppedFunc = func() {}
 	callbacks.ReceivedFunc = func(T) {}
 
-	Start(context.Background(), mailbox, callbacks, WithRespawnAfter(10))
+	Start[T](context.Background(), mailbox, callbacks, WithRespawnAfter(10))
 
 	go func() {
 		for i := 0; i < 20; i++ {
@@ -161,14 +169,15 @@ func Test_should_respawn_after_receiving_n_messages(t *testing.T) {
 }
 
 func Test_should_not_respawn_if_not_provided(t *testing.T) {
+	type T = interface{}
 	var (
 		mailbox   = make(chan T)
-		callbacks = &CallbacksSpy{}
+		callbacks = &CallbacksSpy[T]{}
 	)
 	callbacks.StoppedFunc = func() {}
 	callbacks.ReceivedFunc = func(T) {}
 
-	Start(context.Background(), mailbox, callbacks)
+	Start[T](context.Background(), mailbox, callbacks)
 
 	go func() {
 		for i := 0; i < 20; i++ {
@@ -183,13 +192,14 @@ func Test_should_not_respawn_if_not_provided(t *testing.T) {
 }
 
 func Test_should_respawn_after_idle_timeout_elapsed_if_respawn_count_is_provided(t *testing.T) {
+	type T = interface{}
 	var (
 		mailbox   = make(chan T)
-		callbacks = &CallbacksSpy{}
+		callbacks = &CallbacksSpy[T]{}
 	)
 	callbacks.StoppedFunc = func() {}
 
-	Start(context.Background(), mailbox, callbacks,
+	Start[T](context.Background(), mailbox, callbacks,
 		WithIdleTimeout(time.Millisecond*100),
 		WithRespawnAfter(100))
 
@@ -202,22 +212,26 @@ func Test_should_respawn_after_idle_timeout_elapsed_if_respawn_count_is_provided
 		time.Millisecond*100, time.Millisecond*20)
 }
 
-func getNumberOfStarts(box Mailbox) int {
+func getNumberOfStarts(box interface{}) int {
 	accessMailboxState.Lock()
 	defer accessMailboxState.Unlock()
 
-	return mailboxStateWorkerStartCount[box]
+	return mailboxStateWorkerStartCount[strKey(box)]
 }
 
-func getNumberOfStops(box Mailbox) int {
+func getNumberOfStops(box interface{}) int {
 	accessMailboxState.Lock()
 	defer accessMailboxState.Unlock()
 
-	return mailboxStateWorkerStopCount[box]
+	return mailboxStateWorkerStopCount[strKey(box)]
+}
+
+func strKey(key interface{}) string {
+	return fmt.Sprintf("%v", key)
 }
 
 var (
-	mailboxStateWorkerStopCount  = make(map[Mailbox]int)
-	mailboxStateWorkerStartCount = make(map[Mailbox]int)
+	mailboxStateWorkerStopCount  = make(map[string]int)
+	mailboxStateWorkerStartCount = make(map[string]int)
 	accessMailboxState           = &sync.Mutex{}
 )
