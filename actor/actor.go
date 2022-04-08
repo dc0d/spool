@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-func Start(ctx context.Context, mailbox Mailbox, callbacks Callbacks, options ...Option) {
+func Start[T any](ctx context.Context, mailbox Mailbox[T], callbacks Callbacks[T], options ...Option) {
 	opts := applyOptions(options...)
 	start(ctx, mailbox, callbacks, opts)
 }
 
-func start(ctx context.Context, mailbox Mailbox, callbacks Callbacks, opts actorOptions) {
+func start[T any](ctx context.Context, mailbox Mailbox[T], callbacks Callbacks[T], opts actorOptions) {
 	go func() {
 		if started != nil {
 			started(mailbox)
@@ -69,12 +69,12 @@ func start(ctx context.Context, mailbox Mailbox, callbacks Callbacks, opts actor
 }
 
 type (
-	Callbacks interface {
+	Callbacks[T any] interface {
 		Received(T)
 		Stopped()
 	}
 
-	Mailbox <-chan T
+	Mailbox[T any] <-chan T
 
 	Option func(actorOptions) actorOptions
 
@@ -86,8 +86,6 @@ type (
 
 	RequestCount int
 	MailboxSize  int
-
-	T = interface{}
 )
 
 func WithAbsoluteTimeout(timeout time.Duration) Option {
@@ -111,6 +109,6 @@ func applyOptions(opts ...Option) actorOptions {
 }
 
 var (
-	started func(pool Mailbox)
-	stopped func(pool Mailbox)
+	started func(pool interface{})
+	stopped func(pool interface{})
 )

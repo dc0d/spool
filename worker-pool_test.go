@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dc0d/spool/actor"
+	"github.com/dc0d/spool/test"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -40,13 +43,13 @@ func Test_WorkerPool_grow_should_spawn_workers_equal_to_growth(t *testing.T) {
 	var (
 		ctx     = context.Background()
 		growth  = 100
-		options []Option
+		options []actor.Option
 	)
 	pool := New(-1)
-	exec := &CallbacksSpy{
+	exec := &test.CallbacksSpy[T]{
 		StoppedFunc: func() {},
 	}
-	executorFactory := func() Callbacks { return exec }
+	executorFactory := func() actor.Callbacks[T] { return exec }
 
 	pool.grow(ctx, growth, executorFactory, options...)
 	pool.Stop()
@@ -150,12 +153,12 @@ func Test_WorkerPool_Grow_should_stop_extra_workers_with_absolute_timeout(t *tes
 	absoluteTimeout := time.Millisecond * 10
 	pool := New(9)
 	defer pool.Stop()
-	exec := &CallbacksSpy{
+	exec := &test.CallbacksSpy[T]{
 		StoppedFunc: func() {},
 	}
-	executorFactory := func() Callbacks { return exec }
+	executorFactory := func() actor.Callbacks[T] { return exec }
 
-	pool.grow(context.Background(), increased, executorFactory, WithAbsoluteTimeout(absoluteTimeout))
+	pool.grow(context.Background(), increased, executorFactory, actor.WithAbsoluteTimeout(absoluteTimeout))
 
 	assert.Eventually(t, func() bool {
 		return len(exec.StoppedCalls()) == increased
@@ -168,11 +171,11 @@ func Test_WorkerPool_Grow_should_stop_extra_workers_with_idle_timeout_when_there
 	idleTimeout := time.Millisecond * 50
 	pool := New(100)
 	defer pool.Stop()
-	exec := &CallbacksSpy{
+	exec := &test.CallbacksSpy[T]{
 		StoppedFunc:  func() {},
 		ReceivedFunc: func(fn func()) { fn() },
 	}
-	executorFactory := func() Callbacks { return exec }
+	executorFactory := func() actor.Callbacks[T] { return exec }
 
 	start := make(chan struct{}, n)
 	wg := &sync.WaitGroup{}
@@ -185,7 +188,7 @@ func Test_WorkerPool_Grow_should_stop_extra_workers_with_idle_timeout_when_there
 			})
 		}()
 	}
-	pool.grow(context.Background(), increased, executorFactory, WithIdleTimeout(idleTimeout))
+	pool.grow(context.Background(), increased, executorFactory, actor.WithIdleTimeout(idleTimeout))
 
 	expectedNumberOfWorkers := increased
 	assert.Eventuallyf(t, func() bool {
@@ -206,11 +209,11 @@ func Test_WorkerPool_Grow_should_stop_extra_workers_when_context_is_canceled(t *
 	increased := 10
 	pool := New(10)
 	defer pool.Stop()
-	exec := &CallbacksSpy{
+	exec := &test.CallbacksSpy[T]{
 		StoppedFunc:  func() {},
 		ReceivedFunc: func(fn func()) { fn() },
 	}
-	executorFactory := func() Callbacks { return exec }
+	executorFactory := func() actor.Callbacks[T] { return exec }
 	pool.grow(context.Background(), 1, executorFactory)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -236,11 +239,11 @@ func Test_WorkerPool_Stop_should_close_the_pool(t *testing.T) {
 func Test_WorkerPool_Stop_should_stop_the_workers(t *testing.T) {
 	pool := New(9)
 	increased := 10
-	exec := &CallbacksSpy{
+	exec := &test.CallbacksSpy[T]{
 		StoppedFunc:  func() {},
 		ReceivedFunc: func(fn func()) { fn() },
 	}
-	executorFactory := func() Callbacks { return exec }
+	executorFactory := func() actor.Callbacks[T] { return exec }
 	pool.grow(context.Background(), increased, executorFactory)
 
 	pool.Stop()
