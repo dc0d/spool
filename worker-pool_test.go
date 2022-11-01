@@ -10,8 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dc0d/spool/actor"
-	"github.com/dc0d/spool/test"
+	"github.com/dc0d/actor"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -46,7 +45,7 @@ func Test_WorkerPool_grow_should_spawn_workers_equal_to_growth(t *testing.T) {
 		options []actor.Option
 	)
 	pool := New(-1)
-	exec := &test.CallbacksSpy[T]{
+	exec := &CallbacksSpy[T]{
 		StoppedFunc: func() {},
 	}
 	executorFactory := func() actor.Callbacks[T] { return exec }
@@ -153,7 +152,7 @@ func Test_WorkerPool_Grow_should_stop_extra_workers_with_absolute_timeout(t *tes
 	absoluteTimeout := time.Millisecond * 10
 	pool := New(9)
 	defer pool.Stop()
-	exec := &test.CallbacksSpy[T]{
+	exec := &CallbacksSpy[T]{
 		StoppedFunc: func() {},
 	}
 	executorFactory := func() actor.Callbacks[T] { return exec }
@@ -171,7 +170,7 @@ func Test_WorkerPool_Grow_should_stop_extra_workers_with_idle_timeout_when_there
 	idleTimeout := time.Millisecond * 50
 	pool := New(100)
 	defer pool.Stop()
-	exec := &test.CallbacksSpy[T]{
+	exec := &CallbacksSpy[T]{
 		StoppedFunc:  func() {},
 		ReceivedFunc: func(fn func()) { fn() },
 	}
@@ -209,7 +208,7 @@ func Test_WorkerPool_Grow_should_stop_extra_workers_when_context_is_canceled(t *
 	increased := 10
 	pool := New(10)
 	defer pool.Stop()
-	exec := &test.CallbacksSpy[T]{
+	exec := &CallbacksSpy[T]{
 		StoppedFunc:  func() {},
 		ReceivedFunc: func(fn func()) { fn() },
 	}
@@ -239,7 +238,7 @@ func Test_WorkerPool_Stop_should_close_the_pool(t *testing.T) {
 func Test_WorkerPool_Stop_should_stop_the_workers(t *testing.T) {
 	pool := New(9)
 	increased := 10
-	exec := &test.CallbacksSpy[T]{
+	exec := &CallbacksSpy[T]{
 		StoppedFunc:  func() {},
 		ReceivedFunc: func(fn func()) { fn() },
 	}

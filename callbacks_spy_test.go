@@ -1,10 +1,12 @@
-package actor
+package spool
 
 import (
 	"sync"
+
+	"github.com/dc0d/actor"
 )
 
-var _ Callbacks[int] = &CallbacksSpy[int]{}
+var _ actor.Callbacks[int] = &CallbacksSpy[int]{}
 
 type CallbacksSpy[T any] struct {
 	// ReceivedFunc mocks the Received method.
@@ -46,7 +48,8 @@ func (mock *CallbacksSpy[T]) Received(ifaceVal T) {
 
 // ReceivedCalls gets all the calls that were made to Received.
 // Check the length with:
-//     len(mockedCallbacks.ReceivedCalls())
+//
+//	len(mockedCallbacks.ReceivedCalls())
 func (mock *CallbacksSpy[T]) ReceivedCalls() []struct {
 	IfaceVal T
 } {
@@ -74,7 +77,8 @@ func (mock *CallbacksSpy[T]) Stopped() {
 
 // StoppedCalls gets all the calls that were made to Stopped.
 // Check the length with:
-//     len(mockedCallbacks.StoppedCalls())
+//
+//	len(mockedCallbacks.StoppedCalls())
 func (mock *CallbacksSpy[T]) StoppedCalls() []struct {
 } {
 	var calls []struct {

@@ -6,13 +6,13 @@ import (
 	"context"
 	"log"
 
-	"github.com/dc0d/spool/actor"
+	"github.com/dc0d/actor"
 )
 
 type WorkerPool chan func()
 
 // New creates a new WorkerPool without any initial workers. To spawn workers, Grow must be called.
-func New(mailboxSize actor.MailboxSize) WorkerPool {
+func New(mailboxSize MailboxSize) WorkerPool {
 	if mailboxSize < 0 {
 		mailboxSize = 0
 	}
@@ -76,5 +76,6 @@ func (obj defaultExecutor) Received(fn T) {
 func (obj defaultExecutor) Stopped() {}
 
 type (
-	T = func()
+	T           = func()
+	MailboxSize int
 )
